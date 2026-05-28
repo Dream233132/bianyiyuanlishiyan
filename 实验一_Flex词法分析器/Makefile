@@ -3,7 +3,7 @@
 
 CC = gcc
 FLEX = flex
-CFLAGS = -Wall -fexec-charset=GBK
+CFLAGS = -Wall
 
 # 目标文件
 TARGET = lexer

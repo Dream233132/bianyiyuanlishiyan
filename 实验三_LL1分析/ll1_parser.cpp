@@ -401,23 +401,23 @@ public:
             stack.pop_back();
             string current = inputSymbols[inputIndex];
             
-            // 栈顶是终结符
-            if (isTerminal(top)) {
-                if (top == current) {
-                    cout << setw(30) << ("匹配 " + top) << endl;
-                    inputIndex++;
-                } else {
-                    cout << setw(30) << "错误：不匹配" << endl;
-                    return false;
-                }
-            }
-            // 栈顶是结束符
-            else if (top == END_MARKER) {
+            // 栈顶是结束符（必须在终结符判断之前）
+            if (top == END_MARKER) {
                 if (current == END_MARKER) {
                     cout << setw(30) << "接受" << endl;
                     return true;
                 } else {
                     cout << setw(30) << "错误：输入未结束" << endl;
+                    return false;
+                }
+            }
+            // 栈顶是终结符
+            else if (isTerminal(top)) {
+                if (top == current) {
+                    cout << setw(30) << ("匹配 " + top) << endl;
+                    inputIndex++;
+                } else {
+                    cout << setw(30) << "错误：不匹配" << endl;
                     return false;
                 }
             }

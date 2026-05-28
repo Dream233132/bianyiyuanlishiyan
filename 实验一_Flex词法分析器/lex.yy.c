@@ -743,7 +743,7 @@ YY_DECL
 
 
 #line 53 "lexer.l"
-    /* 关键字 */
+    /* 关键字 优先级最高 */
 #line 747 "lex.yy.c"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */

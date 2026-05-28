@@ -77,30 +77,13 @@ struct Token {
 g++ -std=c++11 -Wall lexer.cpp -o lexer.exe
 
 # 测试正确的程序
-lexer.exe test_correct.c
+chcp 65001
+.\lexer.exe test_correct.c
 
 # 测试错误的程序
-lexer.exe test_error.c
+.\lexer.exe test_error.c
 ```
 
-### Linux/Mac环境
-
-```bash
-# 使用Makefile编译
-make
-
-# 测试正确的程序
-make test_correct
-
-# 测试错误的程序
-make test_error
-
-# 运行所有测试
-make test
-
-# 清理
-make clean
-```
 
 ## 实现特点
 
