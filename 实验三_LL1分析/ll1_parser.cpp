@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <iomanip>
+#include <cstdlib>
 using namespace std;
 
 // 产生式结构
@@ -453,6 +454,11 @@ public:
 };
 
 int main(int argc, char* argv[]) {
+    // 设置Windows控制台为UTF-8编码，避免中文乱码
+    #ifdef _WIN32
+    system("chcp 65001 >nul");
+    #endif
+
     if (argc < 2) {
         cerr << "用法: " << argv[0] << " <文法文件> [输入串]" << endl;
         return 1;

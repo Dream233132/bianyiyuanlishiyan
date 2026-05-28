@@ -40,7 +40,7 @@ Follow(A) 是可能在某个句型中紧跟在A后面的终结符集合。
 
 - **ll1_parser.cpp**: LL(1)分析器实现
 - **grammar.txt**: 文法1（算术表达式文法）
-- **grammar2.txt**: 文法2（if-else语句文法）
+- **grammar2.txt**: 文法2（简单语句文法）
 - **Makefile**: 编译和测试脚本
 
 ## 文法格式
@@ -75,19 +75,18 @@ T -> T * F | F
 F -> ( E ) | id
 ```
 
-### 文法2：if-else语句
+### 文法2：简单语句文法
 ```
-S -> i E t S S' | a
-S' -> e S | ε
-E -> b
+S -> a | ^ | ( T )
+T -> S T'
+T' -> , S T' | ε
 ```
 
 其中：
-- i = if
-- e = else
-- t = then
-- b = boolean表达式
-- a = 赋值语句
+- a = 原子符号
+- ^ = 空符号
+- ( T ) = 括号包围的列表
+- , = 列表分隔符
 
 ## 编译和运行
 
@@ -98,13 +97,13 @@ E -> b
 g++ -std=c++11 -Wall ll1_parser.cpp -o ll1_parser.exe
 
 # 分析文法1
-ll1_parser.exe grammar.txt
+.\ll1_parser.exe grammar.txt
 
 # 分析文法1并解析输入串
-ll1_parser.exe grammar.txt "id + id * id"
+.\ll1_parser.exe grammar.txt "id + id * id"
 
 # 分析文法2并解析输入串
-ll1_parser.exe grammar2.txt "i b t a e a"
+.\ll1_parser.exe grammar2.txt "( a , a )"
 ```
 
 ### Linux/Mac环境
@@ -241,12 +240,12 @@ E => T E'
   => id + id * id
 ```
 
-### 测试2：if-else语句
-**输入串：** `i b t a e a`
+### 测试2：简单语句文法
+**输入串：** `( a , a )`
 
 **预期结果：** 接受
 
-**含义：** if b then a else a
+**含义：** 括号包围的两元素列表
 
 ## 常见问题
 
