@@ -1,6 +1,8 @@
 /*
  * LR(0)语法分析器
- * 功能：自动构造LR(0)项目集族和分析表，并进行语法分析
+ * 实验四：实现LR(0)分析算法，自动构造项目集族和分析表，并给出语句的分析过程
+ * 文法：E->aA|bB, A->cA|d, B->cB|d
+ * 测试串：acccd
  */
 
 #include <iostream>
@@ -12,321 +14,272 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <cstdlib>
 using namespace std;
 
-// 产生式结构
+// 产生式：left -> right[0] right[1] ... right[n-1]
 struct Production {
-    char left;              // 左部非终结符
-    string right;           // 右部符号串
-    
-    bool operator<(const Production& other) const {
-        if (left != other.left) return left < other.left;
-        return right < other.right;
-    }
+    string left;           // 左部非终结符（用string，支持E'等符号）
+    vector<string> right;  // 右部符号序列
 };
 
-// LR(0)项目
+// LR(0)项目：[left -> alpha . beta]
 struct Item {
-    int prodIndex;          // 产生式编号
-    int dotPos;             // 点的位置
-    
-    bool operator<(const Item& other) const {
-        if (prodIndex != other.prodIndex) return prodIndex < other.prodIndex;
-        return dotPos < other.dotPos;
+    int prodIndex;  // 产生式编号
+    int dotPos;     // 点的位置（0 = 点在最前）
+
+    bool operator<(const Item& o) const {
+        if (prodIndex != o.prodIndex) return prodIndex < o.prodIndex;
+        return dotPos < o.dotPos;
     }
-    
-    bool operator==(const Item& other) const {
-        return prodIndex == other.prodIndex && dotPos == other.dotPos;
+    bool operator==(const Item& o) const {
+        return prodIndex == o.prodIndex && dotPos == o.dotPos;
     }
 };
 
-// 动作类型
-enum ActionType { SHIFT, REDUCE, ACCEPT, ERROR };
+// ACTION表条目类型
+enum ActionType { SHIFT, REDUCE, ACCEPT };
 
-// 动作结构
 struct Action {
     ActionType type;
-    int number;  // 状态号或产生式号
+    int number;  // SHIFT->目标状态号，REDUCE->产生式号
 };
 
 class LR0Parser {
 private:
-    vector<Production> productions;              // 产生式集合
-    set<char> terminals;                         // 终结符集合
-    set<char> nonTerminals;                      // 非终结符集合
-    char startSymbol;                            // 开始符号
-    char augmentedStart;                         // 增广开始符号
-    
+    vector<Production> productions;              // 所有产生式（0号为增广产生式）
+    set<string> terminals;                       // 终结符集合
+    set<string> nonTerminals;                    // 非终结符集合
+    string startSymbol;                          // 原始开始符号
+    string augStart;                             // 增广开始符号（如E'）
+
     vector<set<Item>> itemSets;                  // 项目集族
-    map<pair<int, char>, int> gotoTable;         // GOTO表
-    map<pair<int, char>, Action> actionTable;    // ACTION表
-    
-    const char END_MARKER = '$';                 // 结束符号
-    const char EPSILON = 'e';                    // 空串符号（用e表示ε）
-    
-    // 判断是否为终结符
-    bool isTerminal(char symbol) {
-        return terminals.find(symbol) != terminals.end();
+    map<pair<int,string>, int> gotoTable;        // GOTO表：(状态,符号)->状态
+    map<pair<int,string>, Action> actionTable;   // ACTION表：(状态,终结符)->动作
+
+    const string END_MARKER = "$";
+
+    // 获取点后的符号，若点在末尾返回""
+    string symbolAfterDot(const Item& item) const {
+        const Production& p = productions[item.prodIndex];
+        if (item.dotPos < (int)p.right.size())
+            return p.right[item.dotPos];
+        return "";
     }
-    
+
     // 判断是否为非终结符
-    bool isNonTerminal(char symbol) {
-        return nonTerminals.find(symbol) != nonTerminals.end();
+    bool isNonTerminal(const string& s) const {
+        return nonTerminals.count(s) > 0;
     }
-    
-    // 获取项目的点后符号
-    char getSymbolAfterDot(const Item& item) {
-        const Production& prod = productions[item.prodIndex];
-        if (item.dotPos < (int)prod.right.length()) {
-            return prod.right[item.dotPos];
-        }
-        return '\0';  // 点在最后
-    }
-    
-    // 计算项目集的闭包
-    set<Item> closure(const set<Item>& items) {
-        set<Item> result = items;
+
+    // 计算项目集的CLOSURE
+    set<Item> closure(set<Item> items) const {
         bool changed = true;
-        
         while (changed) {
             changed = false;
-            set<Item> newItems;
-            
-            for (const Item& item : result) {
-                char symbol = getSymbolAfterDot(item);
-                
-                // 如果点后是非终结符，添加该非终结符的所有产生式
-                if (isNonTerminal(symbol)) {
-                    for (int i = 0; i < (int)productions.size(); i++) {
-                        if (productions[i].left == symbol) {
-                            Item newItem = {i, 0};
-                            if (result.find(newItem) == result.end() && 
-                                newItems.find(newItem) == newItems.end()) {
-                                newItems.insert(newItem);
-                                changed = true;
-                            }
+            set<Item> toAdd;
+            for (const Item& item : items) {
+                string sym = symbolAfterDot(item);
+                if (sym.empty() || !isNonTerminal(sym)) continue;
+                // 对sym的每条产生式，加入初始项目
+                for (int i = 0; i < (int)productions.size(); i++) {
+                    if (productions[i].left == sym) {
+                        Item ni{i, 0};
+                        if (!items.count(ni) && !toAdd.count(ni)) {
+                            toAdd.insert(ni);
+                            changed = true;
                         }
                     }
                 }
             }
-            
-            result.insert(newItems.begin(), newItems.end());
+            items.insert(toAdd.begin(), toAdd.end());
         }
-        
-        return result;
+        return items;
     }
-    
+
     // 计算GOTO(I, X)
-    set<Item> gotoSet(const set<Item>& items, char symbol) {
-        set<Item> result;
-        
-        for (const Item& item : items) {
-            char nextSymbol = getSymbolAfterDot(item);
-            if (nextSymbol == symbol) {
-                Item newItem = {item.prodIndex, item.dotPos + 1};
-                result.insert(newItem);
-            }
+    set<Item> gotoSet(const set<Item>& I, const string& X) const {
+        set<Item> moved;
+        for (const Item& item : I) {
+            if (symbolAfterDot(item) == X)
+                moved.insert({item.prodIndex, item.dotPos + 1});
         }
-        
-        return closure(result);
+        return moved.empty() ? moved : closure(moved);
     }
-    
+
     // 构造LR(0)项目集族
-    void constructItemSets() {
-        // 创建初始项目集 I0
-        set<Item> I0;
-        I0.insert({0, 0});  // S' -> .S
-        I0 = closure(I0);
+    void buildItemSets() {
+        // I0 = CLOSURE({E' -> .E})
+        set<Item> I0 = closure({{0, 0}});
         itemSets.push_back(I0);
-        
-        // 使用队列处理所有项目集
-        vector<int> queue;
-        queue.push_back(0);
-        size_t queueIndex = 0;
-        
-        while (queueIndex < queue.size()) {
-            int currentIndex = queue[queueIndex++];
-            const set<Item>& currentSet = itemSets[currentIndex];
-            
-            // 收集所有可能的符号
-            set<char> symbols;
-            for (const Item& item : currentSet) {
-                char symbol = getSymbolAfterDot(item);
-                if (symbol != '\0') {
-                    symbols.insert(symbol);
-                }
-            }
-            
-            // 对每个符号计算GOTO
-            for (char symbol : symbols) {
-                set<Item> newSet = gotoSet(currentSet, symbol);
-                
-                if (newSet.empty()) continue;
-                
-                // 查找是否已存在相同的项目集
-                int targetIndex = -1;
-                for (int i = 0; i < (int)itemSets.size(); i++) {
-                    if (itemSets[i] == newSet) {
-                        targetIndex = i;
-                        break;
-                    }
-                }
-                
-                // 如果不存在，添加新项目集
-                if (targetIndex == -1) {
-                    targetIndex = itemSets.size();
-                    itemSets.push_back(newSet);
-                    queue.push_back(targetIndex);
-                }
-                
-                // 记录GOTO转换
-                gotoTable[{currentIndex, symbol}] = targetIndex;
-            }
-        }
-    }
-    
-    // 构造LR(0)分析表
-    bool constructParseTable() {
-        bool hasConflict = false;
-        
+
         for (int i = 0; i < (int)itemSets.size(); i++) {
-            const set<Item>& itemSet = itemSets[i];
-            
-            for (const Item& item : itemSet) {
-                const Production& prod = productions[item.prodIndex];
-                char symbol = getSymbolAfterDot(item);
-                
-                // 移进项目：[A -> α.aβ]
-                if (symbol != '\0' && isTerminal(symbol)) {
-                    auto key = make_pair(i, symbol);
-                    if (gotoTable.find({i, symbol}) != gotoTable.end()) {
-                        int nextState = gotoTable[{i, symbol}];
-                        
-                        if (actionTable.find(key) != actionTable.end()) {
-                            cout << "移进-规约冲突：状态" << i << "，符号" << symbol << endl;
-                            hasConflict = true;
-                        } else {
-                            actionTable[key] = {SHIFT, nextState};
-                        }
-                    }
+            // 收集当前项目集中点后所有可能的符号
+            set<string> symbols;
+            for (const Item& item : itemSets[i]) {
+                string s = symbolAfterDot(item);
+                if (!s.empty()) symbols.insert(s);
+            }
+
+            for (const string& sym : symbols) {
+                set<Item> newSet = gotoSet(itemSets[i], sym);
+                if (newSet.empty()) continue;
+
+                // 查找是否已存在
+                int target = -1;
+                for (int j = 0; j < (int)itemSets.size(); j++) {
+                    if (itemSets[j] == newSet) { target = j; break; }
                 }
-                // 规约项目：[A -> α.]
-                else if (symbol == '\0') {
-                    // 接受项目：[S' -> S.]
-                    if (item.prodIndex == 0) {
-                        actionTable[{i, END_MARKER}] = {ACCEPT, 0};
+                if (target == -1) {
+                    target = (int)itemSets.size();
+                    itemSets.push_back(newSet);
+                }
+                gotoTable[{i, sym}] = target;
+            }
+        }
+    }
+
+    // 构造LR(0)分析表（ACTION + GOTO）
+    bool buildParseTable() {
+        bool conflict = false;
+        for (int i = 0; i < (int)itemSets.size(); i++) {
+            for (const Item& item : itemSets[i]) {
+                string sym = symbolAfterDot(item);
+
+                if (!sym.empty()) {
+                    // 移进项目 [A -> α.aβ]，a为终结符
+                    if (terminals.count(sym)) {
+                        auto key = make_pair(i, sym);
+                        int next = gotoTable[{i, sym}];
+                        if (actionTable.count(key)) {
+                            cerr << "冲突：ACTION[" << i << "," << sym << "]" << endl;
+                            conflict = true;
+                        }
+                        actionTable[key] = {SHIFT, next};
                     }
-                    // 普通规约项目
-                    else {
-                        for (char t : terminals) {
+                    // GOTO表已在buildItemSets中构造，非终结符的转移不写ACTION
+                } else {
+                    // 规约或接受项目 [A -> α.]
+                    if (item.prodIndex == 0) {
+                        // 增广产生式规约 = 接受
+                        auto key = make_pair(i, END_MARKER);
+                        if (actionTable.count(key)) {
+                            cerr << "冲突：ACTION[" << i << ",$]" << endl;
+                            conflict = true;
+                        }
+                        actionTable[key] = {ACCEPT, 0};
+                    } else {
+                        // 对所有终结符（含$）填入规约
+                        set<string> allTerms = terminals;
+                        allTerms.insert(END_MARKER);
+                        for (const string& t : allTerms) {
                             auto key = make_pair(i, t);
-                            if (actionTable.find(key) != actionTable.end()) {
-                                cout << "规约-规约冲突：状态" << i << "，符号" << t << endl;
-                                hasConflict = true;
-                            } else {
-                                actionTable[key] = {REDUCE, item.prodIndex};
+                            if (actionTable.count(key)) {
+                                cerr << "冲突：ACTION[" << i << "," << t << "]" << endl;
+                                conflict = true;
                             }
+                            actionTable[key] = {REDUCE, item.prodIndex};
                         }
                     }
                 }
             }
         }
-        
-        return !hasConflict;
+        return !conflict;
     }
-    
-    // 打印项目
-    void printItem(const Item& item) {
-        const Production& prod = productions[item.prodIndex];
-        cout << prod.left << " -> ";
-        for (int i = 0; i < (int)prod.right.length(); i++) {
+
+    // 打印一个项目
+    void printItem(const Item& item) const {
+        const Production& p = productions[item.prodIndex];
+        cout << p.left << " -> ";
+        for (int i = 0; i <= (int)p.right.size(); i++) {
             if (i == item.dotPos) cout << "·";
-            cout << prod.right[i];
+            if (i < (int)p.right.size()) cout << p.right[i];
         }
-        if (item.dotPos == (int)prod.right.length()) cout << "·";
     }
-    
+
 public:
-    // 读取文法
+    // 从文件读取文法
+    // 格式：每行 A->BC 或 A->a|b（不含空格，|分隔候选式）
     bool loadGrammar(const string& filename) {
         ifstream file(filename);
         if (!file.is_open()) {
             cerr << "无法打开文件: " << filename << endl;
             return false;
         }
-        
+
+        bool first = true;
         string line;
-        bool firstProduction = true;
-        
         while (getline(file, line)) {
+            // 去掉行尾\r
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             if (line.empty() || line[0] == '#') continue;
-            
-            // 解析产生式：A -> alpha
-            size_t arrowPos = line.find("->");
-            if (arrowPos == string::npos) continue;
-            
-            string leftStr = line.substr(0, arrowPos);
-            string rightStr = line.substr(arrowPos + 2);
-            
-            // 去除空格
-            leftStr.erase(remove(leftStr.begin(), leftStr.end(), ' '), leftStr.end());
-            rightStr.erase(remove(rightStr.begin(), rightStr.end(), ' '), rightStr.end());
-            
-            if (leftStr.empty() || rightStr.empty()) continue;
-            
-            char left = leftStr[0];
-            
-            // 第一个产生式的左部是开始符号
-            if (firstProduction) {
-                startSymbol = left;
-                firstProduction = false;
-            }
-            
-            nonTerminals.insert(left);
-            
-            Production prod;
-            prod.left = left;
-            prod.right = rightStr;
-            
-            // 识别终结符
-            for (char c : rightStr) {
-                if (!isupper(c) && c != EPSILON) {
-                    terminals.insert(c);
+
+            size_t pos = line.find("->");
+            if (pos == string::npos) continue;
+
+            string lhs = line.substr(0, pos);
+            // 去除lhs两端空白
+            while (!lhs.empty() && (lhs.front()==' '||lhs.front()=='\t')) lhs.erase(lhs.begin());
+            while (!lhs.empty() && (lhs.back()==' '||lhs.back()=='\t')) lhs.pop_back();
+
+            if (first) { startSymbol = lhs; first = false; }
+            nonTerminals.insert(lhs);
+
+            string rhs = line.substr(pos + 2);
+            // 按|分割候选式
+            stringstream ss(rhs);
+            string alt;
+            while (getline(ss, alt, '|')) {
+                // 去除首尾空白
+                while (!alt.empty() && (alt.front()==' '||alt.front()=='\t')) alt.erase(alt.begin());
+                while (!alt.empty() && (alt.back()==' '||alt.back()=='\t')) alt.pop_back();
+                if (alt.empty()) continue;
+
+                Production prod;
+                prod.left = lhs;
+                // 将右部拆分为单字符符号（本实验文法每个符号均为单字符）
+                for (char c : alt) {
+                    string sym(1, c);
+                    prod.right.push_back(sym);
+                    if (!isupper(c)) terminals.insert(sym);
                 }
+                productions.push_back(prod);
             }
-            
-            productions.push_back(prod);
         }
-        
         file.close();
-        
-        // 添加增广产生式 S' -> S
-        augmentedStart = startSymbol + '\'';
-        Production augProd;
-        augProd.left = augmentedStart;
-        augProd.right = string(1, startSymbol);
-        productions.insert(productions.begin(), augProd);
-        nonTerminals.insert(augmentedStart);
-        
-        terminals.insert(END_MARKER);
-        
+
+        // 添加增广产生式 E' -> E（插入最前面，编号0）
+        augStart = startSymbol + "'";
+        Production aug;
+        aug.left = augStart;
+        aug.right = {startSymbol};
+        productions.insert(productions.begin(), aug);
+        nonTerminals.insert(augStart);
+
         return true;
     }
-    
-    // 分析文法
+
+    // 分析文法，输出项目集族和分析表
     bool analyze() {
+        // 设置Windows控制台UTF-8
+        #ifdef _WIN32
+        system("chcp 65001 >nul");
+        #endif
+
         cout << "\n=== 文法分析 ===" << endl;
         cout << "开始符号: " << startSymbol << endl;
-        cout << "增广开始符号: " << augmentedStart << endl;
-        
+        cout << "增广开始符号: " << augStart << endl;
+
         cout << "\n产生式:" << endl;
         for (int i = 0; i < (int)productions.size(); i++) {
-            cout << i << ": " << productions[i].left << " -> " 
-                 << productions[i].right << endl;
+            cout << i << ": " << productions[i].left << " -> ";
+            for (const string& s : productions[i].right) cout << s;
+            cout << endl;
         }
-        
+
         // 构造项目集族
-        constructItemSets();
+        buildItemSets();
+
         cout << "\n=== LR(0)项目集族 ===" << endl;
         for (int i = 0; i < (int)itemSets.size(); i++) {
             cout << "\nI" << i << ":" << endl;
@@ -336,194 +289,179 @@ public:
                 cout << endl;
             }
         }
-        
+
         // 构造分析表
-        bool success = constructParseTable();
-        if (!success) {
-            cout << "\n该文法不是LR(0)文法！存在冲突。" << endl;
-            return false;
+        bool ok = buildParseTable();
+        if (!ok) {
+            cout << "\n存在冲突，该文法不是严格的LR(0)文法！" << endl;
         }
-        
+
         cout << "\n=== LR(0)分析表 ===" << endl;
-        printParseTable();
-        
-        return true;
+        printTable();
+
+        return ok;
     }
-    
-    // 打印分析表
-    void printParseTable() {
+
+    // 打印ACTION表和GOTO表
+    void printTable() {
+        // 收集所有终结符（排序后输出）
+        vector<string> terms(terminals.begin(), terminals.end());
+        sort(terms.begin(), terms.end());
+        terms.push_back(END_MARKER);
+
+        // 收集非终结符（去掉增广符号）
+        vector<string> nts;
+        for (const string& nt : nonTerminals)
+            if (nt != augStart) nts.push_back(nt);
+        sort(nts.begin(), nts.end());
+
+        int w = 8;  // 列宽
+
         cout << "\nACTION表:" << endl;
-        cout << setw(8) << "状态";
-        for (char t : terminals) {
-            cout << setw(10) << t;
-        }
+        cout << setw(w) << "状态";
+        for (const string& t : terms) cout << setw(w) << t;
         cout << endl;
-        cout << string(8 + terminals.size() * 10, '-') << endl;
-        
+        cout << string(w + (int)terms.size() * w, '-') << endl;
+
         for (int i = 0; i < (int)itemSets.size(); i++) {
-            cout << setw(8) << i;
-            for (char t : terminals) {
-                auto key = make_pair(i, t);
-                if (actionTable.find(key) != actionTable.end()) {
-                    Action action = actionTable[key];
+            cout << setw(w) << i;
+            for (const string& t : terms) {
+                auto it = actionTable.find({i, t});
+                if (it != actionTable.end()) {
                     stringstream ss;
-                    switch (action.type) {
-                        case SHIFT: ss << "s" << action.number; break;
-                        case REDUCE: ss << "r" << action.number; break;
+                    switch (it->second.type) {
+                        case SHIFT:  ss << "s" << it->second.number; break;
+                        case REDUCE: ss << "r" << it->second.number; break;
                         case ACCEPT: ss << "acc"; break;
-                        default: break;
                     }
-                    cout << setw(10) << ss.str();
+                    cout << setw(w) << ss.str();
                 } else {
-                    cout << setw(10) << " ";
+                    cout << setw(w) << " ";
                 }
             }
             cout << endl;
         }
-        
+
         cout << "\nGOTO表:" << endl;
-        cout << setw(8) << "状态";
-        for (char nt : nonTerminals) {
-            if (nt != augmentedStart) {
-                cout << setw(10) << nt;
-            }
-        }
+        cout << setw(w) << "状态";
+        for (const string& nt : nts) cout << setw(w) << nt;
         cout << endl;
-        cout << string(8 + (nonTerminals.size() - 1) * 10, '-') << endl;
-        
+        cout << string(w + (int)nts.size() * w, '-') << endl;
+
         for (int i = 0; i < (int)itemSets.size(); i++) {
-            cout << setw(8) << i;
-            for (char nt : nonTerminals) {
-                if (nt != augmentedStart) {
-                    auto key = make_pair(i, nt);
-                    if (gotoTable.find(key) != gotoTable.end()) {
-                        cout << setw(10) << gotoTable[key];
-                    } else {
-                        cout << setw(10) << " ";
-                    }
-                }
+            cout << setw(w) << i;
+            for (const string& nt : nts) {
+                auto it = gotoTable.find({i, nt});
+                if (it != gotoTable.end())
+                    cout << setw(w) << it->second;
+                else
+                    cout << setw(w) << " ";
             }
             cout << endl;
         }
     }
-    
-    // 语法分析
+
+    // LR(0)语法分析过程
     bool parse(const string& input) {
         cout << "\n=== 语法分析过程 ===" << endl;
         cout << "输入串: " << input << endl << endl;
-        
-        // 初始化栈和输入
-        vector<int> stateStack;
-        vector<char> symbolStack;
-        stateStack.push_back(0);
-        
-        string inputStr = input + END_MARKER;
-        size_t inputIndex = 0;
-        
-        // 打印表头
-        cout << setw(5) << "步骤" << setw(20) << "状态栈" << setw(20) << "符号栈" 
-             << setw(15) << "输入" << setw(25) << "动作" << endl;
+
+        // 将输入拆成单字符符号序列，末尾加$
+        vector<string> inputTokens;
+        for (char c : input) inputTokens.push_back(string(1, c));
+        inputTokens.push_back(END_MARKER);
+
+        vector<int> stateStack = {0};    // 状态栈
+        vector<string> symStack;         // 符号栈
+        int idx = 0;
+
+        // 表头
+        cout << left
+             << setw(5)  << "步骤"
+             << setw(20) << "状态栈"
+             << setw(20) << "符号栈"
+             << setw(15) << "输入"
+             << setw(25) << "动作"
+             << endl;
         cout << string(85, '-') << endl;
-        
+
         int step = 0;
         while (true) {
             // 打印当前状态
-            cout << setw(5) << step++;
-            
-            // 打印状态栈
-            stringstream stateStr;
-            for (int s : stateStack) {
-                stateStr << s << " ";
-            }
-            cout << setw(20) << stateStr.str();
-            
-            // 打印符号栈
-            stringstream symbolStr;
-            for (char c : symbolStack) {
-                symbolStr << c << " ";
-            }
-            cout << setw(20) << symbolStr.str();
-            
-            // 打印输入
-            cout << setw(15) << inputStr.substr(inputIndex);
-            
-            int currentState = stateStack.back();
-            char currentInput = inputStr[inputIndex];
-            
-            auto key = make_pair(currentState, currentInput);
-            if (actionTable.find(key) == actionTable.end()) {
+            stringstream ss_state, ss_sym, ss_input;
+            for (int s : stateStack) ss_state << s << " ";
+            for (const string& s : symStack) ss_sym << s;
+            for (int i = idx; i < (int)inputTokens.size(); i++) ss_input << inputTokens[i];
+
+            cout << left
+                 << setw(5)  << step++
+                 << setw(20) << ss_state.str()
+                 << setw(20) << ss_sym.str()
+                 << setw(15) << ss_input.str();
+
+            int curState = stateStack.back();
+            string curSym = inputTokens[idx];
+
+            auto it = actionTable.find({curState, curSym});
+            if (it == actionTable.end()) {
                 cout << setw(25) << "错误：无对应动作" << endl;
                 return false;
             }
-            
-            Action action = actionTable[key];
-            
-            // 移进
-            if (action.type == SHIFT) {
-                cout << setw(25) << ("移进到状态" + to_string(action.number)) << endl;
-                stateStack.push_back(action.number);
-                symbolStack.push_back(currentInput);
-                inputIndex++;
-            }
-            // 规约
-            else if (action.type == REDUCE) {
-                const Production& prod = productions[action.number];
-                stringstream ss;
-                ss << "用" << prod.left << "->" << prod.right << "规约";
-                cout << setw(25) << ss.str() << endl;
-                
-                // 弹出产生式右部长度的状态和符号
-                int popCount = prod.right.length();
-                for (int i = 0; i < popCount; i++) {
+
+            Action act = it->second;
+            if (act.type == SHIFT) {
+                cout << setw(25) << ("移进 " + curSym + " 到状态" + to_string(act.number)) << endl;
+                stateStack.push_back(act.number);
+                symStack.push_back(curSym);
+                idx++;
+            } else if (act.type == REDUCE) {
+                const Production& prod = productions[act.number];
+                stringstream action_str;
+                action_str << "规约 " << prod.left << "->";
+                for (const string& s : prod.right) action_str << s;
+                cout << setw(25) << action_str.str() << endl;
+
+                // 弹出 |right| 个符号和状态
+                int len = (int)prod.right.size();
+                for (int i = 0; i < len; i++) {
                     stateStack.pop_back();
-                    symbolStack.pop_back();
+                    symStack.pop_back();
                 }
-                
                 // 查GOTO表
-                int gotoState = stateStack.back();
-                auto gotoKey = make_pair(gotoState, prod.left);
-                if (gotoTable.find(gotoKey) == gotoTable.end()) {
-                    cout << "错误：GOTO表中无对应项" << endl;
+                auto gi = gotoTable.find({stateStack.back(), prod.left});
+                if (gi == gotoTable.end()) {
+                    cerr << "错误：GOTO表无对应项" << endl;
                     return false;
                 }
-                
-                stateStack.push_back(gotoTable[gotoKey]);
-                symbolStack.push_back(prod.left);
-            }
-            // 接受
-            else if (action.type == ACCEPT) {
+                stateStack.push_back(gi->second);
+                symStack.push_back(prod.left);
+            } else { // ACCEPT
                 cout << setw(25) << "接受" << endl;
                 return true;
             }
         }
-        
-        return false;
     }
 };
 
 int main(int argc, char* argv[]) {
+    #ifdef _WIN32
+    system("chcp 65001 >nul");
+    #endif
+
     if (argc < 2) {
         cerr << "用法: " << argv[0] << " <文法文件> [输入串]" << endl;
+        cerr << "示例: " << argv[0] << " grammar.txt acccd" << endl;
         return 1;
     }
-    
+
     LR0Parser parser;
-    
-    // 读取文法
-    if (!parser.loadGrammar(argv[1])) {
-        return 1;
-    }
-    
-    // 分析文法
-    if (!parser.analyze()) {
-        return 1;
-    }
-    
-    // 如果提供了输入串，进行语法分析
+
+    if (!parser.loadGrammar(argv[1])) return 1;
+    if (!parser.analyze()) return 1;
+
     if (argc >= 3) {
-        string input = argv[2];
-        parser.parse(input);
+        parser.parse(argv[2]);
     }
-    
+
     return 0;
 }

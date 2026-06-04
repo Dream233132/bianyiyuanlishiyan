@@ -56,13 +56,13 @@ private:
         while (changed) {
             changed = false;
             
-            for (const auto& prod : productions) {
+            for (const auto& prod : productions) {  // 遍历产生式
                 string A = prod.left;
-                const vector<string>& alpha = prod.right;
+                const vector<string>& alpha = prod.right;// 右部符号串
                 
                 // 如果产生式为 A -> ε
                 if (alpha.size() == 1 && alpha[0] == EPSILON) {
-                    if (firstSets[A].find(EPSILON) == firstSets[A].end()) {
+                    if (firstSets[A].find(EPSILON) == firstSets[A].end()) { // 如果ε不在First(A)中，加入ε
                         firstSets[A].insert(EPSILON);
                         changed = true;
                     }
@@ -70,10 +70,12 @@ private:
                 }
                 
                 // 计算 First(alpha)
+                // 按顺序查看，遇到实体就停止，遇到空串就穿透
                 bool allHaveEpsilon = true;
-                for (const auto& symbol : alpha) {
+                for (const auto& symbol : alpha) {// 依次查看右部符号
                     // 将 First(symbol) - {ε} 加入 First(A)
                     for (const auto& s : firstSets[symbol]) {
+                        // 只有当s不是ε，并且s不在First(A)中时，才加入First(A)
                         if (s != EPSILON && firstSets[A].find(s) == firstSets[A].end()) {
                             firstSets[A].insert(s);
                             changed = true;
@@ -101,10 +103,12 @@ private:
         // 初始化：将$加入开始符号的Follow集
         followSets[startSymbol].insert(END_MARKER);
         
+        // 迭代计算 Follow集
         bool changed = true;
         while (changed) {
             changed = false;
             
+            // 两层 for 循环：第一层遍历所有产生式，第二层依次审视产生式右边的每一个符号
             for (const auto& prod : productions) {
                 string A = prod.left;
                 const vector<string>& alpha = prod.right;
@@ -115,7 +119,9 @@ private:
                     // 只处理非终结符
                     if (!isNonTerminal(B)) continue;
                     
+                    // 规则1：计算 Follow(B) 包含 First(beta) - {ε}，其中 beta 是 B 后面的符号串
                     // 计算 First(beta)，其中 beta 是 B 后面的符号串
+                    // E -> (B)
                     bool allHaveEpsilon = true;
                     for (size_t j = i + 1; j < alpha.size(); j++) {
                         string symbol = alpha[j];
@@ -136,6 +142,8 @@ private:
                     }
                     
                     // 如果 beta 能推导出 ε（或B是最后一个符号），将Follow(A)加入Follow(B)
+                    // 规则2：如果 beta 能推导出 ε（或B是最后一个符号），将 Follow(A) 加入 Follow(B)
+                    // 例：A -> BC，如果C能推导出ε，那么Follow(B)包含Follow(A)
                     if (allHaveEpsilon) {
                         for (const auto& s : followSets[A]) {
                             if (followSets[B].find(s) == followSets[B].end()) {
@@ -153,6 +161,8 @@ private:
     bool constructParseTable() {
         bool hasConflict = false;
         
+        // 计算当前产生式右部First 集
+        // 遍历每个产生式 A -> alpha
         for (size_t i = 0; i < productions.size(); i++) {
             const Production& prod = productions[i];
             string A = prod.left;
@@ -162,26 +172,31 @@ private:
             set<string> firstAlpha;
             bool hasEpsilon = true;
             
+            // 遍历当前产生式右部(alpha)的每一个符号，从左到右按顺序检查
             for (const auto& symbol : alpha) {
+                // 遍历当前符号(symbol)的 First 集
                 for (const auto& s : firstSets[symbol]) {
+                    // 只有当s不是ε，并且s不在First(alpha)中时，才加入First(alpha)
                     if (s != EPSILON) {
                         firstAlpha.insert(s);
                     }
                 }
-                
+                // 如果symbol不能推导出ε，停止(没找到ε)
                 if (firstSets[symbol].find(EPSILON) == firstSets[symbol].end()) {
                     hasEpsilon = false;
                     break;
                 }
             }
-            
+            // 特判纯空串的情况
             if (alpha.size() == 1 && alpha[0] == EPSILON) {
                 hasEpsilon = true;
             }
             
+            // 用 First 集填表
             // 对于 First(alpha) 中的每个终结符 a，将产生式加入 M[A, a]
             for (const auto& a : firstAlpha) {
                 auto key = make_pair(A, a);
+                // 如果 M[A, a] 已经有值，则报错
                 if (parseTable.find(key) != parseTable.end()) {
                     cout << "冲突：M[" << A << ", " << a << "] 已有产生式" << endl;
                     hasConflict = true;
@@ -189,6 +204,7 @@ private:
                 parseTable[key] = i;
             }
             
+            // 用 Follow 集填表
             // 如果 ε ∈ First(alpha)，对于 Follow(A) 中的每个符号 b，将产生式加入 M[A, b]
             if (hasEpsilon) {
                 for (const auto& b : followSets[A]) {
@@ -272,7 +288,7 @@ public:
         return true;
     }
     
-    // 分析文法
+    // 分析文法: 计算First集、Follow集，构造分析表
     bool analyze() {
         cout << "\n=== 文法分析 ===" << endl;
         cout << "开始符号: " << startSymbol << endl;

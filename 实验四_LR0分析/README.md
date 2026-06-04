@@ -91,17 +91,22 @@ B -> cB | d
 
 ## 编译和运行
 
-### Windows环境
+### Windows环境（PowerShell）
 
 ```bash
 # 编译
 g++ -std=c++11 -Wall lr0_parser.cpp -o lr0_parser.exe
 
-# 分析文法
-lr0_parser.exe grammar.txt
+# 分析文法（只显示项目集族和分析表）
+.\lr0_parser.exe grammar.txt
 
 # 分析文法并解析输入串
-lr0_parser.exe grammar.txt acccd
+.\lr0_parser.exe grammar.txt acccd
+
+# 测试其他输入串
+.\lr0_parser.exe grammar.txt ad
+.\lr0_parser.exe grammar.txt bd
+.\lr0_parser.exe grammar.txt bcccd
 ```
 
 ### Linux/Mac环境
