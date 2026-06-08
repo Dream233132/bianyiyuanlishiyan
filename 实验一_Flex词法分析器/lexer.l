@@ -116,6 +116,11 @@ int yywrap() {
 }
 
 int main(int argc, char **argv) {
+    /* 设置Windows控制台为UTF-8编码，避免中文乱码 */
+#ifdef _WIN32
+    system("chcp 65001 >nul");
+#endif
+
     if (argc > 1) {
         FILE *file = fopen(argv[1], "r");
         if (!file) {

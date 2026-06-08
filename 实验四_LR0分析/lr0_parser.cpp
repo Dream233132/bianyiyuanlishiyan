@@ -50,7 +50,7 @@ private:
     vector<Production> productions;              // 所有产生式（0号为增广产生式）
     set<string> terminals;                       // 终结符集合
     set<string> nonTerminals;                    // 非终结符集合
-    string startSymbol;                          // 原始开始符号
+    string startSymbol;                          // 原始开始符号(如E)
     string augStart;                             // 增广开始符号（如E'）
 
     vector<set<Item>> itemSets;                  // 项目集族
@@ -73,18 +73,21 @@ private:
     }
 
     // 计算项目集的CLOSURE
+    // 如果圆点·后面是非终结符（大写字母），就把该字符的所有产生式拉进来，并把圆点放在最开头;
     set<Item> closure(set<Item> items) const {
         bool changed = true;
         while (changed) {
             changed = false;
             set<Item> toAdd;
             for (const Item& item : items) {
-                string sym = symbolAfterDot(item);
+                string sym = symbolAfterDot(item); // 点后符号
+                // 如果sym是在最后或sym为终结符，则不处理；否则对sym的每条产生式加入初始项目
                 if (sym.empty() || !isNonTerminal(sym)) continue;
-                // 对sym的每条产生式，加入初始项目
+                // 对sym的每条产生式，加入初始项目，且原点放在开头
                 for (int i = 0; i < (int)productions.size(); i++) {
                     if (productions[i].left == sym) {
                         Item ni{i, 0};
+                        // 去重插入，只有当新项目不在items和toAdd中时才加入
                         if (!items.count(ni) && !toAdd.count(ni)) {
                             toAdd.insert(ni);
                             changed = true;
@@ -98,9 +101,11 @@ private:
     }
 
     // 计算GOTO(I, X)
+    // 计算出当前状态 I 在接收到字符 X 后，会转移到哪一个全新的状态
     set<Item> gotoSet(const set<Item>& I, const string& X) const {
         set<Item> moved;
         for (const Item& item : I) {
+            // 如果项目中圆点后符号是 X，则将该项目的圆点向后移动一位，加入 moved 集合
             if (symbolAfterDot(item) == X)
                 moved.insert({item.prodIndex, item.dotPos + 1});
         }
@@ -115,6 +120,9 @@ private:
 
         for (int i = 0; i < (int)itemSets.size(); i++) {
             // 收集当前项目集中点后所有可能的符号
+            // 它遍历当前状态的所有项目，提取圆点后面的字符；
+            // 同时利用 empty() 校验过滤掉需要规约的项目。
+            // 最终得到的 symbols，就是当前状态可以延伸出的所有合法转移边
             set<string> symbols;
             for (const Item& item : itemSets[i]) {
                 string s = symbolAfterDot(item);
@@ -122,10 +130,11 @@ private:
             }
 
             for (const string& sym : symbols) {
+                // 调用上一节写的 gotoSet 函数，算出了目标集合 newSet
                 set<Item> newSet = gotoSet(itemSets[i], sym);
                 if (newSet.empty()) continue;
 
-                // 查找是否已存在
+                // 如果新的状态已存在，则无需处理，否则加入 LR(0)项目集族(itemSets) 中
                 int target = -1;
                 for (int j = 0; j < (int)itemSets.size(); j++) {
                     if (itemSets[j] == newSet) { target = j; break; }
@@ -146,6 +155,7 @@ private:
             for (const Item& item : itemSets[i]) {
                 string sym = symbolAfterDot(item);
 
+                // 移进分支，圆点没有在最后且后面是终结符
                 if (!sym.empty()) {
                     // 移进项目 [A -> α.aβ]，a为终结符
                     if (terminals.count(sym)) {
